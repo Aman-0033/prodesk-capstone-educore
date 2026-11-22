@@ -2,8 +2,8 @@
 
 > **Tagline:** Learn with direction. Teach with impact.
 >
-> **Blueprint status:** Phase 1 — Product Requirements Document (PRD)  
-> **Engineering track:** Frontend Specialist (Advanced)  
+> **Blueprint status:** Phase 1 — Product Requirements Document (PRD)
+> **Engineering track:** Frontend Specialist (Advanced)
 > **Repository:** `prodesk-capstone-educore`
 
 ---
@@ -205,7 +205,7 @@ The initial MVP supports two end-user roles: **Learner** and **Instructor**. A u
 | Hosting | Vercel | Next.js deployment and preview environments |
 | Source control | Git + GitHub | Version control, issues, and project documentation |
 
-**Implementation note:** Supabase's current SSR guidance uses `@supabase/ssr`, which its documentation currently labels beta. Before implementing server-rendered personalized auth, verify the package's current stability and recommended setup. Keep the authentication/data adapter isolated so this decision does not leak into UI components.
+**Implementation note:** Supabase's current SSR integration uses `@supabase/ssr` for cookie-based sessions and is currently documented as beta. Check the installed package version and current official guide during implementation because its API may change. Keep the authentication/data adapter isolated so the decision does not leak into UI components.
 
 ## 10. Frontend Architecture
 
@@ -222,10 +222,11 @@ src/
 │   │   ├── courses/
 │   │   └── courses/[slug]/
 │   ├── (auth)/
-│   │   ├── sign-in/
-│   │   └── sign-up/
+│   │   ├── login/           # canonical Sprint 14 route: /login
+│   │   └── register/        # canonical Sprint 14 route: /register
+│   ├── (protected)/
+│   │   └── dashboard/      # canonical Sprint 14 route: /dashboard
 │   ├── (learner)/
-│   │   ├── dashboard/
 │   │   └── learn/[courseId]/[lessonId]/
 │   └── (instructor)/
 │       ├── instructor/
@@ -242,7 +243,7 @@ src/
 │   ├── progress/
 │   └── instructor-studio/
 ├── lib/
-│   ├── supabase/           # BaaS client/configuration
+│   ├── supabase/           # browser, server, and request-session utilities
 │   ├── data/               # repository interfaces and adapters
 │   ├── validation/         # shared Zod schemas
 │   └── utils/
@@ -261,10 +262,16 @@ src/
 
 ## 11. Frontend Global State Tree
 
-The following is the planned Zustand state boundary. Remote records (course lists, course details, enrollment records, profile data) should remain in TanStack Query rather than being copied into Zustand.
+The following is the planned Zustand state boundary. During Sprint 14, implement only the safe auth identity mirror and essential application UI state. Remote records (course lists, course details, enrollment records, profile data) should remain in TanStack Query rather than being copied into Zustand.
 
 ```text
 EduCoreStore
+├── auth
+│   ├── user
+│   │   ├── id       # Supabase UID; safe display identity only
+│   │   ├── name
+│   │   └── email
+│   └── status       # loading | authenticated | unauthenticated
 ├── authUi
 │   ├── authDialogOpen
 │   └── postLoginRedirect
@@ -294,7 +301,8 @@ EduCoreStore
 
 **State ownership rules:**
 
-- Authentication identity/session is owned by the Supabase Auth integration; `authUi` contains only temporary presentation/navigation state.
+- Supabase cookie-backed Auth is the source of truth for identity/session. Zustand may hold only an in-memory, server-verified display identity (`id`, `name`, `email`) and a loading/auth status for dashboard UI synchronization. Never store passwords, access tokens, refresh tokens, or raw sessions in Zustand.
+- `authUi` contains only temporary presentation/navigation state.
 - Course, lesson, enrollment, and progress records are remote data and belong in TanStack Query.
 - Playback position and durable lesson completion must be persisted through the data service; ephemeral controls may live in Zustand.
 - Draft course form values should primarily live in the form state; Zustand should only hold editor-wide UI state that must survive navigation between authoring subviews.
@@ -357,7 +365,47 @@ EduCore should feel like a premium learning product rather than a generic admin 
 
 The exact palette, type system, spacing tokens, component styling, and high-fidelity screens will be finalized in the Figma phase after the complete product content and visual references are reviewed.
 
-## 15. Risks and Mitigations
+## 15. Sprint 14 Walking Skeleton — Authentication and Routing
+
+Sprint 14 is a separate implementation milestone with a narrower scope than the full LMS MVP. Its delivery gate is a working, deployable authentication pipeline. The application must not begin course catalog, lesson player, instructor studio, or progress-tracking implementation until authentication and protected routing are stable.
+
+### Canonical routes
+
+| Route | Access | Expected behavior |
+|---|---|---|
+| `/login` | Public while signed out | Email/password sign-in; authenticated visitors are redirected to `/dashboard` |
+| `/register` | Public while signed out | Name/email/password registration; authenticated visitors are redirected to `/dashboard` |
+| `/dashboard` | Authenticated only | Minimal proof page showing the current user's name, email, UID, and sign-out action |
+| `/` | Public entry | Redirect to `/dashboard` when authenticated, otherwise `/login` |
+
+### Sprint 14 acceptance criteria
+
+1. Login, registration, and dashboard routes are implemented in the Next.js App Router.
+2. Supabase Auth handles email/password registration and login; sessions are stored using the current Supabase SSR cookie integration.
+3. The dashboard is protected by an early request-level redirect and a separate server-side verified identity check. The request interceptor is not treated as the sole authorization boundary.
+4. The Next.js request interception filename matches the installed version: `proxy.ts` on Next.js 16; `middleware.ts` on Next.js 15 and earlier.
+5. Zustand is synchronized with a safe display identity containing only `id`, `name`, and `email`, plus an authentication status. Passwords and tokens are never stored in Zustand or localStorage.
+6. Registration handles both immediate-session and email-confirmation-required outcomes without pretending an unverified account is authenticated.
+7. Refreshing the dashboard preserves a valid session; signing out clears the session and blocks subsequent dashboard access.
+8. The app builds for production and is deployed to Vercel with environment variables and Supabase redirect URLs configured.
+9. The QA demo shows registration, login, protected dashboard access, refresh persistence, and sign-out.
+
+### Security notes
+
+- Verify server identity with Supabase verified claims (`auth.getClaims()`) or a server-confirmed user lookup (`auth.getUser()`). Do not use `getSession()` alone as an authorization check in server code because its cookie/session payload is not itself revalidated.
+- The request interceptor should perform fast session refresh and optimistic redirects; enforce data permissions at the data source with Supabase Row Level Security (RLS).
+- Keep service-role keys server-only and out of browser bundles. Commit only an `.env.example` with placeholder values, never `.env.local` or real credentials.
+
+### Supabase environment variables
+
+```text
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+```
+
+Implementation prompt: [`Sprint14-Antigravity-Prompt.md`](Sprint14-Antigravity-Prompt.md).
+
+## 16. Risks and Mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -368,17 +416,17 @@ The exact palette, type system, spacing tokens, component styling, and high-fide
 | Zustand becomes a duplicate database | Keep remote data in TanStack Query and restrict Zustand to UI state |
 | Visual polish harms usability/performance | Use purposeful motion, reduced-motion support, optimized images, and measurable performance checks |
 
-## 16. Delivery Roadmap
+## 17. Delivery Roadmap
 
 | Sprint | Focus | Expected outcome |
 |---|---|---|
 | Sprint 13 | Blueprint and planning | PRD, Figma wireframes, state-tree diagram, prompt log, repository setup |
-| Sprint 14 | MVP foundation | App shell, auth flows, role-aware navigation, catalog and course detail |
-| Sprint 15 | Core learning and authoring | Learner dashboard, lesson player, progress persistence, instructor course authoring and uploads |
+| Sprint 14 | Walking Skeleton — authentication and routing | Next.js App Router scaffolding for `/login`, `/register`, and `/dashboard`; Supabase Auth; cookie-backed session persistence; protected-route redirects; server-side identity verification; Zustand safe-user synchronization; Vercel deployment and QA demo. Do not begin catalog, player, instructor, or progress features until this pipeline is stable. |
+| Sprint 15 | Core learning and authoring | Course catalog/detail, learner learning dashboard, lesson player, progress persistence, and instructor course authoring/uploads |
 | Sprint 16 | Quality and enhancement | P1 candidates only if P0 is stable, responsive/accessibility/performance polish, comprehensive testing |
 | Sprint 17 | Release | Production configuration, CI checks, Vercel deployment, QA demo, final documentation |
 
-## 17. Blueprint Deliverables and Links
+## 18. Blueprint Deliverables and Links
 
 | Deliverable | Status | Link/location |
 |---|---|---|
@@ -400,7 +448,7 @@ The exact palette, type system, spacing tokens, component styling, and high-fide
 
 At minimum, the Figma file will include desktop and mobile behavior for the core journeys; the exact audited viewport count will be confirmed against the assignment rubric.
 
-## 18. Repository Setup
+## 19. Repository Setup
 
 Create a **public** repository named:
 
@@ -414,6 +462,7 @@ Suggested initial repository contents:
 prodesk-capstone-educore/
 ├── README.md
 ├── Prompts.md
+├── Sprint14-Antigravity-Prompt.md
 ├── docs/
 │   └── architecture/
 │       └── mock-api-contracts.md
@@ -426,7 +475,7 @@ After creating the public repository on GitHub, add these files and replace ever
 
 ---
 
-## 19. Official Technical References
+## 20. Official Technical References
 
 - [Next.js App Router](https://nextjs.org/docs/app)
 - [Next.js Server and Client Components](https://nextjs.org/docs/app/getting-started/server-and-client-components)
@@ -440,5 +489,5 @@ After creating the public repository on GitHub, add these files and replace ever
 
 ---
 
-**Document owner:** EduCore Capstone — Frontend Specialist  
-**Version:** 1.0 — Phase 1 PRD draft
+**Document owner:** EduCore Capstone — Frontend Specialist
+**Version:** 1.1 — Phase 1 PRD + Sprint 14 walking-skeleton scope

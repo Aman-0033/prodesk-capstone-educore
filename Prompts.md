@@ -122,4 +122,84 @@ For future AI-assisted work:
 
 ---
 
-**Prompt log version:** 1.0 — Phase 1 planning
+**Prompt log version:** 1.1 — Phase 1 planning + Sprint 14 implementation planning
+
+
+## Prompt 07 — Sprint 14 walking skeleton implementation
+
+**Purpose:** Translate the Sprint 14 assignment into a tightly scoped implementation prompt for Antigravity, prioritizing authentication and protected routing over feature development or visual polish.
+
+```text
+Act as a Staff Frontend Engineer and security-minded Next.js architect.
+Inspect the existing EduCore repository and read README.md and Prompts.md before
+changing anything. This is the Advanced Frontend track. Implement only the Sprint
+14 walking skeleton: Next.js App Router routes /login, /register, and /dashboard;
+Supabase email/password authentication; cookie-backed SSR session handling;
+request-level optimistic redirects; server-side verified dashboard protection;
+and Zustand synchronization of a safe user display identity containing id, name,
+and email. Use the correct request-interception convention for the installed
+Next.js version (proxy.ts in Next.js 16, middleware.ts in earlier versions). Use
+Supabase's current @supabase/ssr guidance, verify identities with getClaims() or
+getUser(), never use getSession() alone for server authorization, never store
+passwords or tokens in Zustand/localStorage, and handle email-confirmation-required
+sign-up outcomes honestly. Keep UI styling intentionally simple and accessible;
+do not implement the catalog, player, instructor studio, progress, payments, AI,
+or decorative 3D/animation yet. Preserve working files, add an .env.example with
+placeholders only, run lint/typecheck/build/tests, and report actual results and
+all manual Supabase/Vercel setup steps.
+```
+
+**Decision recorded:** Sprint 14 is narrowed to authentication and routing because this is the explicit delivery gate in the second assignment. The full LMS feature set remains in the PRD but is sequenced after the walking skeleton. Canonical routes are `/login`, `/register`, and `/dashboard`. Supabase Auth cookies remain the session source of truth; Zustand mirrors only a safe user identity for UI hydration.
+
+**Implementation prompt artifact:** `Sprint14-Antigravity-Prompt.md`.
+
+## Prompt 08 — Supabase/Next.js security review
+
+**Purpose:** Validate the current SSR integration and route protection against official framework/provider guidance before shipping.
+
+```text
+Review EduCore's Sprint 14 auth implementation against the currently installed
+Next.js and Supabase package versions and their current official documentation.
+Check cookie-based SSR session handling, proxy.ts versus middleware.ts naming,
+refresh behavior, server-side claim verification, sign-up email-confirmation
+behavior, cache headers/session isolation, logout cleanup, route redirects, and
+Vercel environment configuration. Identify any use of unverified getSession()
+for authorization, client-only route guards, localStorage token storage, exposed
+service-role keys, or claims that are not checked near protected data. Report
+findings by severity and fix only confirmed issues without unrelated refactoring.
+```
+
+**Decision recorded:** Use the current Supabase SSR package guidance; the request interceptor is an early redirect/session-refresh layer, not the only access-control boundary. Use `getClaims()` for verified identity checks (or `getUser()` when an up-to-date user record is needed). Follow the installed Next.js version's file convention.
+
+## Prompt 09 — Sprint 14 Walking Skeleton Delivery Decisions
+
+**Purpose:** Document the final architecture, file conventions, security layers, and test results delivered for the Sprint 14 walking skeleton.
+
+```text
+Record the implementation decisions for Sprint 14: Next.js version 16.4.6, proxy.ts
+convention, layered route protection with server-side claim verification, Zustand safe
+identity hydration, cookie-backed Supabase SSR, and test verification suite.
+```
+
+**Decisions recorded:**
+1. **Next.js Version & Proxy Convention:** Confirmed Next.js 16.4.6 installed. Adopted `src/proxy.ts` exporting `proxy` (Node.js runtime) for network-boundary session refreshing and optimistic route redirection.
+2. **Canonical Routes:** Created App Router routes:
+   - `src/app/(auth)/login/page.tsx` (`/login`)
+   - `src/app/(auth)/register/page.tsx` (`/register`)
+   - `src/app/(protected)/dashboard/page.tsx` (`/dashboard`)
+   - `src/app/page.tsx` (`/` redirect)
+3. **Layered Route Protection:**
+   - Layer 1: `src/proxy.ts` executes early cookie session refresh and optimistic redirects.
+   - Layer 2: `src/lib/auth/server-auth.ts` -> `requireAuthUser()` executes independent server-side identity verification via `auth.getClaims()` / `auth.getUser()`, calling Next.js `redirect('/login')` if unauthenticated.
+   - Layer 3: Supabase Row Level Security (RLS) reserved for data sources in future sprints.
+4. **Zustand Auth Store:**
+   - In-memory UI mirror in `src/stores/auth-store.ts` storing strictly `{ id, name, email }` and `status`.
+   - Hydrated cleanly via `<AuthSync initialUser={user} />` on client mount.
+   - Absolutely no JWT tokens, passwords, refresh tokens, or localStorage persistence.
+5. **Form Validation:** React Hook Form + Zod (`loginSchema`, `registerSchema`) with field-level errors and accessible HTML attributes.
+6. **Verification & Testing:**
+   - ESLint: 0 errors, 0 warnings.
+   - TypeScript (`tsc --noEmit`): 0 errors.
+   - Next.js Production Build: Success with static `/login`, `/register` and dynamic server-rendered `/dashboard`, `/`.
+   - Node test runner (`npm test`): 10/10 unit & security tests passed.
+   - Playwright E2E (`npm run test:e2e`): 5/5 route protection & form validation journeys passed.
